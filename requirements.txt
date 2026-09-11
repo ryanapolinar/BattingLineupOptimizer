@@ -1,0 +1,4 @@
+streamlit>=1.36,<2
+mlb-statsapi>=0.5,<1
+pandas>=2.0,<3
+requests>=2.31,<3

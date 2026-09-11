@@ -405,7 +405,7 @@ def build_combined_df(optimized_lineup, slot_key, stats):
 def render_optimized_tab(optimized_lineup, slot_key, title, stats, file_prefix):
     """Render one optimized-lineup tab with the table and its shift diff combined."""
     combined_df = build_combined_df(optimized_lineup, slot_key, stats)
-    st.markdown(f"## 🚀 {title}")
+    st.markdown(f"## {title}")
     st.dataframe(
         combined_df,
         use_container_width=True,
@@ -489,11 +489,11 @@ def main():
         hide_index=True,
     )
 
-    tab_obp, tab_wrc, tab_hybrid = st.tabs(["🚀 OBP Optimized", "🚀 WRC+ Optimized", "🚀 Hybrid Optimized"])
+    tab_obp, tab_wrc, tab_hybrid = st.tabs(["⬜ OBP Optimized", "⚾ WRC+ Optimized", "🚀 Hybrid Optimized"])
 
     with tab_obp:
         render_optimized_tab(obp_optimized_lineup, 'opt_slot',
-                             "OBP-Optimized Lineup", ['obp'], "obp_optimization")
+                             "OBP Optimized Lineup", ['obp'], "obp_optimization")
         st.markdown(
             "**What is OBP?** OBP stands for **On Base Percentage** — how often a batter "
             "reaches base safely per plate appearance. Theoretically, if you get on base, you "
@@ -503,7 +503,7 @@ def main():
         )
     with tab_wrc:
         render_optimized_tab(wrc_optimized_lineup, 'wrc_slot',
-                             "wRC+-Optimized Lineup", ['wrc_plus'], "wrc_optimization")
+                             "wRC+ Optimized Lineup", ['wrc_plus'], "wrc_optimization")
         st.markdown(
             "**What is wRC+?** wRC+ (**Weighted Runs Created Plus**) is one number that tells you "
             "how good a hitter is, adjusted for ballpark and league. **100 is the league average** — "
@@ -514,7 +514,7 @@ def main():
         )
     with tab_hybrid:
         render_optimized_tab(hybrid_lineup, 'hybrid_slot',
-                             "Hybrid Optimized Lineup (OBP + wRC+ + Handedness)",
+                             "Hybrid Optimized Lineup",
                              ['obp', 'wrc_plus'], "hybrid_optimization")
         st.markdown(
             "**Hybrid Optimized** blends OBP, wRC+, and handedness into one lineup, adapted from "

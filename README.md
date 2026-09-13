@@ -1,4 +1,5 @@
 # ⚾ MLB Batting Lineup Optimizer
+
 ## https://mlb-lineup-optimizer-ryanapolinar.streamlit.app/
 
 A Streamlit web app that compares a team's actual starting batting order against sabermetric-optimized lineups, built around OBP and wRC+.
@@ -7,11 +8,12 @@ This project was inspired by the video **[Mario Super Sluggers' Anti-Analytics L
 
 ## What it does
 
-The app pulls a team's latest starting lineup from MLB StatsAPI and generates three optimized batting orders, shown across three tabs:
+The app pulls a team's latest starting lineup from MLB StatsAPI and generates four optimized batting orders, shown across four tabs:
 
 - **⬜ OBP Optimized** — sorts the lineup by On Base Percentage, putting the best on-base hitters at the top.
 - **⚾ WRC+ Optimized** — ranks by wRC+ (Weighted Runs Created Plus), stacking the best run producers in the heart of the order.
 - **🚀 Hybrid Optimized** — blends OBP, wRC+, and handedness using the heuristic from the video above.
+- **📕 The Book** — applies the fixed slot template from Tom Tango's _The Book_: the three best hitters in slots #1/#2/#4, 4th- and 5th-best in #3/#5, then #6–#9 in descending quality.
 
 Each optimized table also shows each player's **Actual Slot** and **Movement** (how far they shifted from the real lineup), and supports CSV download of the results.
 

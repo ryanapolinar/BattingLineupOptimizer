@@ -308,12 +308,44 @@ def build_hybrid_lineup(lineup_rows):
     return order
 
 
+def build_tango_lineup(lineup_rows):
+    """Build the batting order from the Bluebird Banter / 'The Book' article.
+
+    Sherman's template from 'Optimizing Order, Part 1' (Bluebird Banter, based on
+    Tango's The Book), ranking batters by quality where quality = wRC+:
+      - The three best hitters (ranks 1-3) bat in slots #1, #2, #4.
+      - The 4th- and 5th-best hitters bat in slots #3 and #5.
+      - Slots #6 through #9 take the remaining players in descending quality.
+
+    Equivalent to a rank->slot map of {1:1, 2:2, 3:4, 4:3, 5:5, k:k for k>=6},
+    i.e. the only shuffle is the deliberate #3 / #4 swap. Handedness is ignored.
+
+    Players without wRC+ (No Stats) rank as worst and fall to the tail.
+
+    Returns a new list of row dicts in optimized order.
+    """
+    if not lineup_rows:
+        return []
+
+    def wrc_key(row):
+        return (row.get('wrc_plus') is None, -(row.get('wrc_plus') or 0.0))
+
+    ranked = sorted(lineup_rows, key=wrc_key)  # best wRC+ first
+
+    by_slot = {}
+    for rank, row in enumerate(ranked, start=1):
+        slot = {1: 1, 2: 2, 3: 4, 4: 3, 5: 5}.get(rank, rank)
+        by_slot[slot] = row
+
+    return [by_slot[s] for s in sorted(by_slot)]
+
+
 def prepare_optimized_lineups(lineup_rows):
-    """Assign actual batting-order slots and build the three optimized orders.
+    """Assign actual batting-order slots and build the optimized orders.
 
     Mutates each row dict in-place by adding 'actual_slot', 'has_stats', 'has_wrc',
-    'opt_slot', 'wrc_slot' and 'hybrid_slot'. Returns
-    (obp_optimized_lineup, wrc_optimized_lineup, hybrid_lineup) in optimized order.
+    'opt_slot', 'wrc_slot', 'hybrid_slot' and 'tango_slot'. Returns
+    (obp_optimized_lineup, wrc_optimized_lineup, hybrid_lineup, tango_lineup).
     """
     for idx, row in enumerate(lineup_rows, 1):
         row['actual_slot'] = idx
@@ -337,7 +369,12 @@ def prepare_optimized_lineups(lineup_rows):
     for idx, row in enumerate(hybrid_lineup, 1):
         row['hybrid_slot'] = idx
 
-    return obp_optimized_lineup, wrc_optimized_lineup, hybrid_lineup
+    # The Book (Sherman) order: fixed slot template by wRC+ quality.
+    tango_lineup = build_tango_lineup(lineup_rows)
+    for idx, row in enumerate(tango_lineup, 1):
+        row['tango_slot'] = idx
+
+    return obp_optimized_lineup, wrc_optimized_lineup, hybrid_lineup, tango_lineup
 
 
 def build_display_df(optimized_lineup, slot_key, stats):
@@ -478,8 +515,9 @@ def main():
     st.header(f"⚾ {selected_team} Batting Lineup")
     st.success(f"📌 **Latest Starting Lineup Loaded:** {game_summary}")
 
-    # Build all three optimized orders: OBP, wRC+, and Hybrid.
-    obp_optimized_lineup, wrc_optimized_lineup, hybrid_lineup = prepare_optimized_lineups(lineup_rows)
+    # Build all four optimized orders: OBP, wRC+, Hybrid, and The Book (Tango).
+    (obp_optimized_lineup, wrc_optimized_lineup,
+     hybrid_lineup, tango_lineup) = prepare_optimized_lineups(lineup_rows)
 
     # Show the actual batting lineup once, as the shared reference every diff compares against.
     st.markdown(f"## 📋 Actual Batting Lineup")
@@ -489,7 +527,9 @@ def main():
         hide_index=True,
     )
 
-    tab_obp, tab_wrc, tab_hybrid = st.tabs(["⬜ OBP Optimized", "⚾ WRC+ Optimized", "🚀 Hybrid Optimized"])
+    tab_obp, tab_wrc, tab_hybrid, tab_tango = st.tabs(
+        ["⬜ OBP Optimized", "⚾ WRC+ Optimized", "🚀 Hybrid Optimized", "📕 The Book"]
+    )
 
     with tab_obp:
         render_optimized_tab(obp_optimized_lineup, 'opt_slot',
@@ -526,6 +566,19 @@ def main():
             "3. Slots 3–9 are ranked by wRC+, descending.\n"
             "4. Avoid stacking same-handed hitters: if the last two batters bat from the same "
             "side, the next pick must come from the opposite hand.\n"
+        )
+    with tab_tango:
+        render_optimized_tab(tango_lineup, 'tango_slot',
+                             "The Book Lineup",
+                             ['wrc_plus'], "thebook_optimization")
+        st.markdown(
+            "**The Book — Sherman template** follows the slot template from based on Tom Tango's "
+            "*The Book: Playing the Percentages in Baseball*"
+            ". Here, we use **wRC+** to rank our hitters. The rules:\n\n"
+            "1. Your **three best** hitters bat in slots **#1, #2, #4**.\n"
+            "2. Your **4th- and 5th-best** hitters bat in slots **#3 and #5**.\n"
+            "3. Slots **#6 through #9** take the rest in descending order of quality.\n\n"
+            "Handedness is not considered as part of Tango's formula."
         )
 
 

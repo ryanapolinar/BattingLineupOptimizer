@@ -8,8 +8,9 @@ This project was inspired by the video **[Mario Super Sluggers' Anti-Analytics L
 
 ## What it does
 
-The app pulls a team's latest starting lineup from MLB StatsAPI and generates four optimized batting orders, shown across four tabs:
+The app pulls a team's starting lineup from MLB StatsAPI and generates four optimized batting orders, shown across four tabs:
 
+- **Game selector** — the latest starting lineup loads and renders **first**, then the **Select Game** dropdown populates in the background with that season's played games. It defaults to **Latest Starting Lineup** and lets you pick any past game, so you can compare how the order changes game to game, then optimize against it.
 - **⬜ OBP Optimized** — sorts the lineup by On Base Percentage, putting the best on-base hitters at the top.
 - **⚾ WRC+ Optimized** — ranks by wRC+ (Weighted Runs Created Plus), stacking the best run producers in the heart of the order.
 - **🚀 Hybrid Optimized** — blends OBP, wRC+, and handedness using the heuristic from the video above.

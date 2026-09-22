@@ -23,69 +23,105 @@ def parse_batting_stat(stat, key):
         return None
 
 
-@st.cache_data(ttl=1800, show_spinner="Retrieving latest starting lineup...")
-def get_latest_lineup(team_id):
-    """Return the starting batting order for a team's most recent game.
+PLAYED_STATUSES = ('Final', 'Live', 'In Progress', 'Completed Early', 'Warmup')
+
+
+def _filter_played(sched):
+    """Filter schedule entries to games that were actually played (or are live)."""
+    return [g for g in sched if g.get('status') in PLAYED_STATUSES]
+
+
+@st.cache_data(ttl=1800, show_spinner="Retrieving season schedule...")
+def get_played_games(team_id, season):
+    """Return the team's played games for a season, newest first.
+
+    Built only from cheap schedule metadata (no boxscore fetches), so it safely
+    powers a season-wide game dropdown. Each item is a statsapi.schedule dict
+    with game_id, game_date, status, home_id, away_id, scores and a summary.
+    """
+    try:
+        start_date = f"01/01/{season}"
+        end_date = f"12/31/{season}"
+        sched = statsapi.schedule(team=team_id, start_date=start_date, end_date=end_date)
+    except Exception as e:
+        st.warning(f"Could not fetch schedule: {e}")
+        return []
+
+    played = _filter_played(sched)
+    played.sort(key=lambda g: g.get('game_date', ''), reverse=True)
+    return played
+
+
+@st.cache_data(ttl=1800, show_spinner="Retrieving starting lineup...")
+def get_lineup_for_game(team_id, game_id, is_home):
+    """Return a single game's starting batting order as a list of row dicts.
 
     Each row is built entirely from the boxscore (team data) keyed by player ID:
-    {id, name, pos, bat_hand, obp, avg, slg, ops, hits, hr}. No name matching involved.
+    {id, name, pos, bat_hand, obp, avg, slg, ops, hits, hr}. No name matching
+    involved. Returns an empty list if the game has no batting order.
+    """
+    try:
+        box = statsapi.boxscore_data(game_id)
+    except Exception as e:
+        st.warning(f"Could not fetch boxscore for game {game_id}: {e}")
+        return []
 
-    Returns (lineup_rows, game_summary). lineup_rows is a list of dicts.
+    team_box = box['home'] if is_home else box['away']
+    batting_order_ids = team_box.get('battingOrder', [])
+    if not batting_order_ids:
+        return []
+
+    players_dict = team_box.get('players', {})
+    rows = []
+    for player_id in batting_order_ids:
+        key = f"ID{player_id}"
+        p_info = players_dict.get(key) or {}
+        p_person = p_info.get('person') or {}
+        p_pos = p_info.get('position') or {}
+        stat = (p_info.get('seasonStats') or {}).get('batting') or {}
+        rows.append({
+            'id': player_id,
+            'name': p_person.get('fullName', 'Unknown'),
+            'pos': p_pos.get('abbreviation', ''),
+            'obp': parse_batting_stat(stat, 'obp'),
+            'avg': parse_batting_stat(stat, 'avg'),
+            'slg': parse_batting_stat(stat, 'slg'),
+            'ops': parse_batting_stat(stat, 'ops'),
+            'hits': parse_batting_stat(stat, 'hits'),
+            'hr': parse_batting_stat(stat, 'homeRuns'),
+        })
+
+    if rows:
+        bat_hands = get_batting_hands([r['id'] for r in rows])
+        for r in rows:
+            r['bat_hand'] = bat_hands.get(r['id'], 'N/A')
+    return rows
+
+
+@st.cache_data(ttl=1800, show_spinner="Retrieving latest starting lineup...")
+def get_latest_lineup(team_id):
+    """Return the most recent game's starting batting order for a team.
+
+    Fetches only a short window (last 14 days) so the latest lineup loads
+    quickly; the season-wide schedule is loaded separately for the dropdown.
+    Returns (lineup_rows, game_summary).
     """
     try:
         today = datetime.date.today()
         start_date = (today - datetime.timedelta(days=14)).strftime('%m/%d/%Y')
         end_date = today.strftime('%m/%d/%Y')
-
         sched = statsapi.schedule(team=team_id, start_date=start_date, end_date=end_date)
-        if not sched:
-            return [], "No games scheduled in the last 14 days."
-
-        played_games = [g for g in sched if g.get('status') in ('Final', 'Live', 'In Progress', 'Completed Early', 'Warmup')]
-        candidates = list(reversed(played_games)) or list(reversed(sched))
-
-        for game in candidates:
-            game_pk = game['game_id']
-            game_date = game.get('game_date', 'Unknown Date')
-            summary = game.get('summary', f"Game {game_pk}")
-
-            box = statsapi.boxscore_data(game_pk)
-            is_home = game.get('home_id') == team_id
-            team_box = box['home'] if is_home else box['away']
-
-            batting_order_ids = team_box.get('battingOrder', [])
-            if not batting_order_ids:
-                continue
-
-            players_dict = team_box.get('players', {})
-            rows = []
-            for player_id in batting_order_ids:
-                key = f"ID{player_id}"
-                if key not in players_dict:
-                    continue
-                p_info = players_dict[key]
-                stat = (p_info.get('seasonStats') or {}).get('batting') or {}
-                rows.append({
-                    'id': player_id,
-                    'name': p_info['person']['fullName'],
-                    'pos': p_info['position']['abbreviation'],
-                    'obp': parse_batting_stat(stat, 'obp'),
-                    'avg': parse_batting_stat(stat, 'avg'),
-                    'slg': parse_batting_stat(stat, 'slg'),
-                    'ops': parse_batting_stat(stat, 'ops'),
-                    'hits': parse_batting_stat(stat, 'hits'),
-                    'hr': parse_batting_stat(stat, 'homeRuns'),
-                })
-
-            if rows:
-                bat_hands = get_batting_hands([r['id'] for r in rows])
-                for r in rows:
-                    r['bat_hand'] = bat_hands.get(r['id'], 'N/A')
-                return rows, f"{summary} ({game_date})"
-
-        return [], "No games with starting lineups found in the last 14 days."
     except Exception as e:
         return [], f"Error fetching lineup: {e}"
+
+    played = _filter_played(sched)
+    played.sort(key=lambda g: g.get('game_date', ''), reverse=True)
+    for game in played:
+        is_home = game.get('home_id') == team_id
+        rows = get_lineup_for_game(team_id, game['game_id'], is_home)
+        if rows:
+            return rows, game.get('summary', f"Game {game['game_id']}")
+    return [], "No games with starting lineups found in the last 14 days."
 @st.cache_data(ttl=3600, show_spinner="Fetching active roster...")
 def get_active_roster(team_id):
     """Fetch the active roster for a given team, mapping player ID -> (name, position)."""
@@ -461,66 +497,17 @@ def render_optimized_tab(optimized_lineup, slot_key, title, stats, file_prefix):
     )
 
 
-def main():
-    st.markdown("""
-        <div style='background-color:#005A9C;padding:15px;border-radius:10px;margin-bottom:20px'>
-            <h1 style='color:white;text-align:center;margin:0;'>⚾ MLB Batting Lineup Optimizer</h1>
-            <p style='color:#A5C9EB;text-align:center;font-size:1.1rem;margin:5px 0 0 0;'>
-                Comparing actual starting lineups against Sabermetric OBP-optimized batting orders.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.header("Interactive Controls")
-
-    season_options = [2026, 2025, 2024, 2023]
-    selected_season = st.sidebar.selectbox("Select Stats Season", season_options, index=0)
-
-    # MLB Team Selector (defaults to the Los Angeles Dodgers), resolved via name + id.
-    teams_raw = get_mlb_teams()
-    teams_raw.sort(key=lambda t: t["name"])
-    team_names = [t["name"] for t in teams_raw]
-    team_id_map = {t["name"]: t["id"] for t in teams_raw}
-
-    default_team = "Los Angeles Dodgers"
-    default_index = team_names.index(default_team) if default_team in team_names else 0
-    selected_team = st.sidebar.selectbox("Select MLB Team", team_names, index=default_index)
-    selected_team_id = team_id_map[selected_team]
-
-    with st.spinner(f"Preparing application data for {selected_team}..."):
-        lineup_rows, game_summary = get_latest_lineup(selected_team_id)
-
-        # Build the full active roster's batting stats, keyed by player ID.
-        active_roster = get_active_roster(selected_team_id)
-        lineup_ids = [r['id'] for r in lineup_rows]
-
-        # Union of lineup players + all active non-pitchers on the roster.
-        all_ids = set(lineup_ids)
-        for pid, info in active_roster.items():
-            if info['pos'] not in ("P", "SP", "RP"):
-                all_ids.add(pid)
-
-        team_stats = get_team_batting_stats(selected_team_id, selected_season, sorted(all_ids))
-
-    # Augment each lineup row with its wRC+ (from the people endpoint, keyed by ID).
-    wrc_map = {pid: info.get('wrc_plus') for pid, info in team_stats.items()}
-    for row in lineup_rows:
-        row['wrc_plus'] = wrc_map.get(row['id'])
-
-    if not lineup_rows:
-        st.warning(f"⚠️ Could not automatically fetch starting lineup: {game_summary or 'No game data available.'}")
-        st.info("Ensure that there are active games played within the last 14 days or that MLB StatsAPI service is available.")
-        return
-
+def render_lineup_tables(lineup_rows, selected_team, game_summary):
+    """Render the actual lineup plus all four optimized-order tabs."""
     st.header(f"⚾ {selected_team} Batting Lineup")
-    st.success(f"📌 **Latest Starting Lineup Loaded:** {game_summary}")
+    st.success(f"📌 **Starting Lineup Loaded:** {game_summary}")
 
     # Build all four optimized orders: OBP, wRC+, Hybrid, and The Book (Tango).
     (obp_optimized_lineup, wrc_optimized_lineup,
      hybrid_lineup, tango_lineup) = prepare_optimized_lineups(lineup_rows)
 
     # Show the actual batting lineup once, as the shared reference every diff compares against.
-    st.markdown(f"## 📋 Actual Batting Lineup")
+    st.markdown("## 📋 Actual Batting Lineup")
     st.dataframe(
         build_display_df(sorted(lineup_rows, key=lambda x: x['actual_slot']), 'actual_slot', ['obp']),
         use_container_width=True,
@@ -580,6 +567,119 @@ def main():
             "3. Slots **#6 through #9** take the rest in descending order of quality.\n\n"
             "Handedness is not considered as part of Tango's formula."
         )
+
+
+def main():
+    st.markdown("""
+        <div style='background-color:#005A9C;padding:15px;border-radius:10px;margin-bottom:20px'>
+            <h1 style='color:white;text-align:center;margin:0;'>⚾ MLB Batting Lineup Optimizer</h1>
+            <p style='color:#A5C9EB;text-align:center;font-size:1.1rem;margin:5px 0 0 0;'>
+                Comparing actual starting lineups against Sabermetric OBP-optimized batting orders.
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.header("Interactive Controls")
+
+    season_options = [2026, 2025, 2024, 2023]
+    selected_season = st.sidebar.selectbox("Select Stats Season", season_options, index=0)
+
+    # MLB Team Selector (defaults to the Los Angeles Dodgers), resolved via name + id.
+    teams_raw = get_mlb_teams()
+    teams_raw.sort(key=lambda t: t["name"])
+    team_names = [t["name"] for t in teams_raw]
+    team_id_map = {t["name"]: t["id"] for t in teams_raw}
+
+    default_team = "Los Angeles Dodgers"
+    default_index = team_names.index(default_team) if default_team in team_names else 0
+    selected_team = st.sidebar.selectbox("Select MLB Team", team_names, index=default_index)
+    selected_team_id = team_id_map[selected_team]
+
+    # Game selection constant: -1 means "Latest Starting Lineup".
+    LATEST = -1
+
+    # Reset the persisted game selection whenever the team or season changes.
+    context = (selected_team_id, selected_season)
+    if st.session_state.get("_ctx") != context:
+        st.session_state["game_target"] = None
+        st.session_state["_ctx"] = context
+
+    # Which game should the lineups show? None => Latest. This is loaded from a
+    # bounded (fast) schedule window so the tables render BEFORE the full season
+    # schedule finishes loading for the dropdown below.
+    target = st.session_state.get("game_target")
+
+    with st.spinner(f"Loading {selected_team} lineup..."):
+        if target is None:
+            lineup_rows, game_summary = get_latest_lineup(selected_team_id)
+        else:
+            is_home = target.get('home_id') == selected_team_id
+            lineup_rows = get_lineup_for_game(selected_team_id, target['game_id'], is_home)
+            game_summary = target.get('summary', f"Game {target.get('game_id')}")
+
+        # Build the full active roster's batting stats, keyed by player ID.
+        active_roster = get_active_roster(selected_team_id)
+        lineup_ids = [r['id'] for r in lineup_rows]
+
+        # Union of lineup players + all active non-pitchers on the roster.
+        all_ids = set(lineup_ids)
+        for pid, info in active_roster.items():
+            if info['pos'] not in ("P", "SP", "RP"):
+                all_ids.add(pid)
+
+        team_stats = get_team_batting_stats(selected_team_id, selected_season, sorted(all_ids))
+
+    # Augment each lineup row with its wRC+ (from the people endpoint, keyed by ID).
+    wrc_map = {pid: info.get('wrc_plus') for pid, info in team_stats.items()}
+    for row in lineup_rows:
+        row['wrc_plus'] = wrc_map.get(row['id'])
+
+    if lineup_rows:
+        # Render the tables now, then load the season schedule in the background.
+        render_lineup_tables(lineup_rows, selected_team, game_summary)
+    else:
+        st.warning(f"⚠️ Could not fetch starting lineup: {game_summary or 'No game data available.'}")
+        st.info("Ensure that a lineup is available or that MLB StatsAPI service is reachable.")
+
+    # ------------------------------------------------------------------
+    # Now load the full season schedule and expose the game dropdown.
+    # The tables above have already been rendered, so users see them first
+    # while this season-wide schedule finishes fetching in the background.
+    # ------------------------------------------------------------------
+    played_games = get_played_games(selected_team_id, selected_season)
+
+    def game_label(i):
+        if i == LATEST:
+            return "📌 Latest Starting Lineup"
+        g = played_games[i]
+        away = g.get('away_name', '?')
+        home = g.get('home_name', '?')
+        a = g.get('away_score') or 0
+        h = g.get('home_score') or 0
+        return (f"{g.get('game_date', '?')} · {away} ({a}) @ {home} ({h})"
+                f" · {g.get('status', '')}")
+
+    game_options = [LATEST] + list(range(len(played_games)))
+
+    # Widget index matching the currently displayed target (Latest is index 0).
+    if target is None:
+        widget_index = 0
+    else:
+        idx = next((i for i, g in enumerate(played_games)
+                    if g.get('game_id') == target.get('game_id')), None)
+        widget_index = idx + 1 if idx is not None else 0
+
+    selected_game = st.sidebar.selectbox(
+        "Select Game", game_options, index=widget_index, format_func=game_label
+    )
+
+    # Re-run only when the pick differs, so the tables aren't re-rendered twice.
+    new_target = None if selected_game == LATEST else dict(played_games[selected_game])
+    old_id = None if target is None else target.get('game_id')
+    new_id = None if new_target is None else new_target.get('game_id')
+    if old_id != new_id:
+        st.session_state["game_target"] = new_target
+        st.rerun()
 
 
 if __name__ == "__main__":

@@ -322,7 +322,9 @@ def build_hybrid_lineup(lineup_rows):
     remaining = [r for r in remaining if r is not second]
 
     # Slots 3-9: rank by wRC+ desc, alternating handedness when needed.
-    placed_hands = []  # handedness of batters already placed in slots 3+.
+    # Seed the tracker with the hands of slots 1-2 so the pair check can fire
+    # as early as slot 3, instead of only after two placements within 3-9.
+    placed_hands = [lead.get('bat_hand'), second.get('bat_hand')]
     while remaining:
         need_opposite = False
         if len(placed_hands) >= 2:

@@ -438,6 +438,40 @@ def build_display_df(optimized_lineup, slot_key, stats):
     return pd.DataFrame(display_rows)
 
 
+# Target-metric highlight. The scout-yellow matches the highlight used by
+# PitchingLab (constructed there from a white->#FACC15 ramp); dark text keeps it
+# readable against this app's forced dark theme (#0e1117 background).
+HIGHLIGHT_STYLE = "background-color: #FACC15; color: #0E1117; font-weight: 600"
+
+
+def highlight_target_metric(df, highlight):
+    """Return a Styler that highlights each row's target metric cell.
+
+    highlight is a callable that receives a display row (a pandas Series) and
+    returns the column label(s) to highlight for that row, e.g. ["OBP"] for the
+    OBP table, or ["OBP"] for the leadoff spot and ["wRC+"] for every other slot
+    in the hybrid table. Cells showing "No Stats" are left unhighlighted.
+    """
+    def _style_row(row):
+        targets = set(highlight(row))
+        return [
+            HIGHLIGHT_STYLE if col in targets and row[col] != "No Stats" else ""
+            for col in df.columns
+        ]
+
+    return df.style.apply(_style_row, axis=1)
+
+
+def highlight_column(column):
+    """Highlight rule targeting one column in every row (OBP, wRC+, The Book)."""
+    return lambda row: [column]
+
+
+def highlight_hybrid(row):
+    """Hybrid highlight rule: OBP for the leadoff spot, wRC+ for every other slot."""
+    return ["OBP"] if row["Spot"] == "#1" else ["wRC+"]
+
+
 def build_combined_df(optimized_lineup, slot_key, stats):
     """Combine an optimized lineup and its shift diff into a single table.
 
@@ -477,12 +511,16 @@ def build_combined_df(optimized_lineup, slot_key, stats):
     return pd.DataFrame(combined_rows)
 
 
-def render_optimized_tab(optimized_lineup, slot_key, title, stats, file_prefix):
-    """Render one optimized-lineup tab with the table and its shift diff combined."""
+def render_optimized_tab(optimized_lineup, slot_key, title, stats, file_prefix, highlight):
+    """Render one optimized-lineup tab with the table and its shift diff combined.
+
+    highlight is a callable (row -> list of column labels) picking the target
+    metric cell to highlight for each row; see highlight_target_metric.
+    """
     combined_df = build_combined_df(optimized_lineup, slot_key, stats)
     st.markdown(f"## {title}")
     st.dataframe(
-        combined_df,
+        highlight_target_metric(combined_df, highlight),
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -511,7 +549,7 @@ def render_lineup_tables(lineup_rows, selected_team, game_summary):
     # Show the actual batting lineup once, as the shared reference every diff compares against.
     st.markdown("## 📋 Actual Batting Lineup")
     st.dataframe(
-        build_display_df(sorted(lineup_rows, key=lambda x: x['actual_slot']), 'actual_slot', ['obp']),
+        build_display_df(sorted(lineup_rows, key=lambda x: x['actual_slot']), 'actual_slot', ['obp', 'wrc_plus']),
         use_container_width=True,
         hide_index=True,
     )
@@ -522,7 +560,8 @@ def render_lineup_tables(lineup_rows, selected_team, game_summary):
 
     with tab_obp:
         render_optimized_tab(obp_optimized_lineup, 'opt_slot',
-                             "OBP Optimized Lineup", ['obp'], "obp_optimization")
+                             "OBP Optimized Lineup", ['obp', 'wrc_plus'], "obp_optimization",
+                             highlight_column("OBP"))
         st.markdown(
             "**What is OBP?** OBP stands for **On Base Percentage** — how often a batter "
             "reaches base safely per plate appearance. Theoretically, if you get on base, you "
@@ -532,7 +571,8 @@ def render_lineup_tables(lineup_rows, selected_team, game_summary):
         )
     with tab_wrc:
         render_optimized_tab(wrc_optimized_lineup, 'wrc_slot',
-                             "wRC+ Optimized Lineup", ['wrc_plus'], "wrc_optimization")
+                             "wRC+ Optimized Lineup", ['obp', 'wrc_plus'], "wrc_optimization",
+                             highlight_column("wRC+"))
         st.markdown(
             "**What is wRC+?** wRC+ (**Weighted Runs Created Plus**) is one number that tells you "
             "how good a hitter is, adjusted for ballpark and league. **100 is the league average** — "
@@ -544,7 +584,7 @@ def render_lineup_tables(lineup_rows, selected_team, game_summary):
     with tab_hybrid:
         render_optimized_tab(hybrid_lineup, 'hybrid_slot',
                              "Hybrid Optimized Lineup",
-                             ['obp', 'wrc_plus'], "hybrid_optimization")
+                             ['obp', 'wrc_plus'], "hybrid_optimization", highlight_hybrid)
         st.markdown(
             "**Hybrid Optimized** blends OBP, wRC+, and handedness into one lineup, adapted from "
             "the heuristic in the video "
@@ -559,9 +599,10 @@ def render_lineup_tables(lineup_rows, selected_team, game_summary):
     with tab_tango:
         render_optimized_tab(tango_lineup, 'tango_slot',
                              "The Book Lineup",
-                             ['wrc_plus'], "thebook_optimization")
+                             ['obp', 'wrc_plus'], "thebook_optimization",
+                             highlight_column("wRC+"))
         st.markdown(
-            "**The Book — Sherman template** follows the slot template from based on Tom Tango's "
+            "**The Book** follows the slot template from based on Tom Tango's "
             "*The Book: Playing the Percentages in Baseball*"
             ". Here, we use **wRC+** to rank our hitters. The rules:\n\n"
             "1. Your **three best** hitters bat in slots **#1, #2, #4**.\n"
